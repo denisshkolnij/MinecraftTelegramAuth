@@ -7,15 +7,16 @@ import org.bukkit.event.player.*;
 import org.bukkit.scheduler.BukkitTask;
 import org.bukkit.ChatColor;
 import org.bukkit.plugin.java.JavaPlugin;
-import org.telegram.telegrambots.meta.TelegramBotsApi;
-import org.telegram.telegrambots.meta.exceptions.TelegramApiException;
-import org.telegram.telegrambots.updatesreceivers.DefaultBotSession;
+import org.jspecify.annotations.NonNull;
+import org.telegram.telegrambots.longpolling.BotSession;
+import org.telegram.telegrambots.longpolling.TelegramBotsLongPollingApplication;
 
 import java.util.*;
 
 public final class MinecraftTelegramAuth extends JavaPlugin implements Listener {
     private PlayerDataManager db;
     private TelegramBot bot;
+    private BotSession botSession;
     private final Map<UUID, BukkitTask> timeouts = new HashMap<>();
     private final Map<String, UUID> linkCodes = new HashMap<>();
 
@@ -31,7 +32,16 @@ public final class MinecraftTelegramAuth extends JavaPlugin implements Listener 
         try {
             db = new PlayerDataManager(getDataFolder().toPath());
             bot = new TelegramBot(this);
-            new TelegramBotsApi(DefaultBotSession.class).registerBot(bot);
+            try {
+                // Новий спосіб для версії 9.x
+                TelegramBotsLongPollingApplication botsApp = new TelegramBotsLongPollingApplication();
+                botSession = botsApp.registerBot(getConfig().getString("telegram.bot-token"), bot); // bot — твій екземпляр TelegramBot
+                getLogger().info("Telegram бот успішно запущений!");
+            } catch (Exception e) {
+                getLogger().severe("Не вдалося запустити Telegram бота: " + e.getMessage());
+                e.printStackTrace();
+                getServer().getPluginManager().disablePlugin(this);
+            }
             getServer().getPluginManager().registerEvents(this, this);
         } catch (Exception e) {
             getLogger().severe("Помилка запуску: " + e.getMessage());
@@ -40,9 +50,15 @@ public final class MinecraftTelegramAuth extends JavaPlugin implements Listener 
     }
 
     @Override
-    public void onDisable() { if (db != null) db.close(); }
+    public void onDisable() {
+        if (db != null)
+            db.close();
+        if (botSession != null) botSession.stop();
+    }
 
-    private String color(String str) { return ChatColor.translateAlternateColorCodes('&', str); }
+    private String color(String str) {
+        return ChatColor.translateAlternateColorCodes('&', str);
+    }
 
     private String generateCode(UUID uuid) {
         String code = UUID.randomUUID().toString().substring(0, 8).toUpperCase();
@@ -96,97 +112,119 @@ public final class MinecraftTelegramAuth extends JavaPlugin implements Listener 
         db.setPending(uuid, false);
         db.setLoggedIn(uuid, true);
         Player p = getServer().getPlayer(uuid);
-        if (p != null) p.sendMessage(c("&a✅ Вхід підтверджено! Приємної гри!"));
+        if (p != null) p.sendMessage(color("&a✅ Вхід підтверджено! Приємної гри!"));
     }
 
-    @EventHandler 
+    @EventHandler
     public void onJoin(PlayerJoinEvent e) {
         Player p = e.getPlayer();
         if (db.isRegistered(p.getUniqueId())) {
-            p.sendMessage(c("&aВітаємо назад! Введіть &b/login <пароль>"));
+            p.sendMessage(color("&aВітаємо назад! Введіть &b/login <пароль>"));
         } else {
-            p.sendMessage(c("&eЛаскаво просимо! Зареєструйтесь: &b/register <пароль> <повторити>"));
+            p.sendMessage(color("&eЛаскаво просимо! Зареєструйтесь: &b/register <пароль> <повторити>"));
         }
     }
 
-    @EventHandler 
+    @EventHandler
     public void onQuit(PlayerQuitEvent e) {
         UUID u = e.getPlayer().getUniqueId();
         db.setLoggedIn(u, false);
-        timeouts.computeIfPresent(u, (uu, t) -> { t.cancel(); return null; });
+        timeouts.computeIfPresent(u, (uu, t) -> {
+            t.cancel(); return null;
+        });
     }
 
     private void restrict(Player p) {
         if (!db.isLoggedIn(p.getUniqueId())) {
-            p.sendMessage(c("&cСпочатку авторизуйтесь!"));
+            p.sendMessage(color("&cСпочатку авторизуйтесь!"));
         }
     }
 
-    @EventHandler 
-    public void onMove(PlayerMoveEvent e) { if (!db.isLoggedIn(e.getPlayer().getUniqueId())) e.setCancelled(true); }
-    @EventHandler 
-    public void onChat(AsyncPlayerChatEvent e) { if (!db.isLoggedIn(e.getPlayer().getUniqueId())) e.setCancelled(true); }
-    @EventHandler 
+    @EventHandler
+    public void onMove(PlayerMoveEvent e) {
+        if (!db.isLoggedIn(e.getPlayer().getUniqueId())) {
+            e.setCancelled(true);
+        }
+    }
+
+    @EventHandler
+    public void onChat(AsyncPlayerChatEvent e) {
+        if (!db.isLoggedIn(e.getPlayer().getUniqueId())) {
+            e.setCancelled(true);
+        }
+    }
+
+    @EventHandler
     public void onCommand(PlayerCommandPreprocessEvent e) {
         String cmd = e.getMessage().toLowerCase();
-        if (!cmd.startsWith("/login") && !cmd.startsWith("/register") && !db.isLoggedIn(e.getPlayer().getUniqueId()))
+        if (!cmd.startsWith("/login") && !cmd.startsWith("/register") && !db.isLoggedIn(e.getPlayer().getUniqueId())) {
             e.setCancelled(true);
+        }
     }
 
     @Override
-    public boolean onCommand(org.bukkit.command.CommandSender s, org.bukkit.command.Command cmd, String l, String[] args) {
-        if (!(s instanceof Player p)) return true;
-        if (db.isLoggedIn(p.getUniqueId()) && !l.equals("2fa") && !l.equals("changepassword")) {
-            p.sendMessage(c("&cВи вже авторизовані."));
+    public boolean onCommand(org.bukkit.command.@NonNull CommandSender sender, org.bukkit.command.@NonNull Command cmd, @NonNull String label, String @NonNull [] args) {
+        if (!(sender instanceof Player player)) return true;
+        if (db.isLoggedIn(player.getUniqueId()) && !label.equals("2fa") && !label.equals("changepassword")) {
+            player.sendMessage(color("&cВи вже авторизовані."));
             return true;
         }
 
-        switch (l.toLowerCase()) {
+        switch (label.toLowerCase()) {
             case "register" -> {
                 if (args.length != 2 || !args[0].equals(args[1]) || args[0].length() < 4) {
-                    p.sendMessage(c("&c/register <пароль> <повторити> (мін. 4 символи)"));
+                    player.sendMessage(color("&c/register <пароль> <повторити> (мін. 4 символи)"));
                     return true;
                 }
-                if (db.isRegistered(p.getUniqueId())) {
-                    p.sendMessage(c("&cВи вже зареєстровані. Використовуйте /login"));
+                if (db.isRegistered(player.getUniqueId())) {
+                    player.sendMessage(color("&cВи вже зареєстровані. Використовуйте /login"));
                     return true;
                 }
-                afterPassword(p, db.register(p, a[0]));
+                afterPassword(player, db.register(player, args[0]));
             }
+
             case "login" -> {
-                if (args.length != 1) { p.sendMessage(c("&c/login <пароль>")); return true; }
-                afterPassword(p, db.login(p, a[0]));
+                if (args.length != 1) {
+                    player.sendMessage(color("&c/login <пароль>"));
+                    return true;
+                }
+                afterPassword(player, db.login(player, args[0]));
             }
+
             case "changepassword" -> {
-                if (!db.isLoggedIn(p.getUniqueId())) { restrict(p); return true; }
-                if (args.length != 3 || !args[1].equals(a[2]) || args[1].length() < 4) {
-                    p.sendMessage(c("&c/changepassword <старий> <новий> <повторити>"));
+                if (!db.isLoggedIn(player.getUniqueId())) {
+                    restrict(player);
                     return true;
                 }
-                if (db.changePassword(p.getUniqueId(), a[0], a[1])) {
-                    p.sendMessage(c("&aПароль змінено!"));
+                if (args.length != 3 || !args[1].equals(args[2]) || args[1].length() < 4) {
+                    player.sendMessage(color("&c/changepassword <старий> <новий> <повторити>"));
+                    return true;
+                }
+                if (db.changePassword(player.getUniqueId(), args[0], args[1])) {
+                    player.sendMessage(color("&aПароль змінено!"));
                 } else {
-                    p.sendMessage(c("&cНевірний старий пароль."));
+                    player.sendMessage(color("&colorНевірний старий пароль."));
                 }
             }
+
             case "2fa" -> {
-                if (args.length == 0) { p.sendMessage(c("&c/2fa status [гравець] | /2fa unlink")); return true; }
-                if (args[0].equalsIgnoreCase("unlink")) {
-                    if (!db.isLoggedIn(p.getUniqueId())) { restrict(p); return true; }
-                    db.setTelegramId(p.getUniqueId(), null);
-                    p.sendMessage(c("&aTelegram відв’язаний. Тепер тільки пароль."));
+                if (args.length == 0) {
+                    player.sendMessage(color("&c/2fa status [гравець]"));
                     return true;
                 }
+
                 if (args[0].equalsIgnoreCase("status")) {
-                    Player t = (a.length > 1 && p.hasPermission("telegramauth.2fa.others")) ?
-                            getServer().getPlayer(a[1]) : p;
-                    if (t == null) { p.sendMessage(color("&cГравець не онлайн.")); return true; }
+                    Player t = (args.length > 1 && player.hasPermission("telegramauth.2fa.others")) ? getServer().getPlayer(args[1]) : player;
+                    if (t == null) {
+                        player.sendMessage(color("&cГравець не онлайн."));
+                        return true;
+                    }
                     Long id = db.getTelegramId(t.getUniqueId());
-                    p.sendMessage(c("&7=== 2FA статус: &e" + t.getName() + " &7==="));
-                    p.sendMessage(id == null ? c("&c✖ Не прив’язаний") : c("&a✔ Прив’язаний (активна 2FA)"));
-                    if (id == null && t == p && db.isLoggedIn(p.getUniqueId())) {
-                        String code = genCode(p.getUniqueId());
-                        p.sendMessage(c("&eПрив’язати: надішліть боту &b/link " + code));
+                    player.sendMessage(color("&7=== 2FA статус: &e" + t.getName() + " &7==="));
+                    player.sendMessage(id == null ? color("&c✖ Не прив’язаний") : color("&a✔ Прив’язаний (активна 2FA)"));
+                    if (id == null && t == player && db.isLoggedIn(player.getUniqueId())) {
+                        String code = generateCode(player.getUniqueId());
+                        player.sendMessage(color("&eПрив’язати: надішліть боту &b/link " + code));
                     }
                     return true;
                 }
@@ -194,4 +232,4 @@ public final class MinecraftTelegramAuth extends JavaPlugin implements Listener 
         }
         return true;
     }
-          }
+}

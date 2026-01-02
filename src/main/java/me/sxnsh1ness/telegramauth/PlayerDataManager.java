@@ -1,10 +1,13 @@
-package ua.sxnsh1ness.telegramauth;
+package me.sxnsh1ness.telegramauth;
 
+import org.bukkit.Bukkit;
 import org.bukkit.entity.Player;
 import org.mindrot.jbcrypt.BCrypt;
 
 import java.nio.file.Path;
 import java.sql.*;
+import java.util.Objects;
+import java.util.UUID;
 
 public class PlayerDataManager {
     private final Connection conn;
@@ -40,7 +43,7 @@ public class PlayerDataManager {
         return false;
     }
 
-    private boolean updatePassword(java.util.UUID uuid, String pass) {
+    private boolean updatePassword(UUID uuid, String pass) {
         String hash = BCrypt.hashpw(pass, BCrypt.gensalt());
         try (PreparedStatement ps = conn.prepareStatement(
                 "INSERT OR REPLACE INTO users(uuid, nickname, password_hash) VALUES(?, ?, ?)")) {
@@ -53,20 +56,22 @@ public class PlayerDataManager {
         } catch (SQLException e) { return false; }
     }
 
-    public boolean changePassword(java.util.UUID uuid, String oldPass, String newPass) {
-        if (!login(org.bukkit.Bukkit.getOfflinePlayer(uuid).getPlayer(), oldPass)) return false;
+    public boolean changePassword(UUID uuid, String oldPass, String newPass) {
+        if (!login(Objects.requireNonNull(Bukkit.getOfflinePlayer(uuid).getPlayer()), oldPass)) return false;
         return updatePassword(uuid, newPass);
     }
 
-    public Long getTelegramId(java.util.UUID uuid) {
+    public Long getTelegramId(UUID uuid) {
         try (PreparedStatement ps = conn.prepareStatement("SELECT telegram_chat_id FROM users WHERE uuid = ?")) {
             ps.setString(1, uuid.toString());
             ResultSet rs = ps.executeQuery();
             return rs.next() && rs.getLong(1) != 0 ? rs.getLong(1) : null;
-        } catch (SQLException e) { return null; }
+        } catch (SQLException e) {
+            return null;
+        }
     }
 
-    public void setTelegramId(java.util.UUID uuid, Long chatId) {
+    public void setTelegramId(UUID uuid, Long chatId) {
         try (PreparedStatement ps = conn.prepareStatement("UPDATE users SET telegram_chat_id = ? WHERE uuid = ?")) {
             ps.setObject(1, chatId);
             ps.setString(2, uuid.toString());
@@ -74,14 +79,14 @@ public class PlayerDataManager {
         } catch (SQLException ignored) {}
     }
 
-    public boolean isPending(java.util.UUID uuid) {
+    public boolean isPending(UUID uuid) {
         try (PreparedStatement ps = conn.prepareStatement("SELECT pending_login FROM users WHERE uuid = ?")) {
             ps.setString(1, uuid.toString());
             return ps.executeQuery().next() && ps.getResultSet().getInt(1) == 1;
         } catch (SQLException e) { return false; }
     }
 
-    public void setPending(java.util.UUID uuid, boolean pending) {
+    public void setPending(UUID uuid, boolean pending) {
         try (PreparedStatement ps = conn.prepareStatement("UPDATE users SET pending_login = ? WHERE uuid = ?")) {
             ps.setInt(1, pending ? 1 : 0);
             ps.setString(2, uuid.toString());
@@ -96,8 +101,18 @@ public class PlayerDataManager {
         } catch (SQLException e) { return false; }
     }
 
-    public boolean isLoggedIn(java.util.UUID uuid) { return loggedIn.getOrDefault(uuid, false); }
-    public void setLoggedIn(java.util.UUID uuid, boolean state) { if (state) loggedIn.put(uuid, true); else loggedIn.remove(uuid); }
+    public boolean isLoggedIn(UUID uuid) {
+        return loggedIn.getOrDefault(uuid, false);
+    }
+
+    public void setLoggedIn(java.util.UUID uuid, boolean state) {
+        if (state) {
+            loggedIn.put(uuid, true);
+        } else {
+            loggedIn.remove(uuid);
+        }
+    }
+
     private void updateNickname(Player p) {
         try (PreparedStatement ps = conn.prepareStatement("UPDATE users SET nickname = ? WHERE uuid = ?")) {
             ps.setString(1, p.getName());
@@ -106,5 +121,9 @@ public class PlayerDataManager {
         } catch (SQLException ignored) {}
     }
 
-    public void close() { try { conn.close(); } catch (SQLException ignored) {} }
-              }
+    public void close() {
+        try {
+            conn.close();
+        } catch (SQLException ignored) {}
+    }
+}
