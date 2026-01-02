@@ -42,9 +42,9 @@ public final class MinecraftTelegramAuth extends JavaPlugin implements Listener 
     @Override
     public void onDisable() { if (db != null) db.close(); }
 
-    private String color(String str) { return ChatColor.translateAlternateColorCodes('&', s); }
+    private String color(String str) { return ChatColor.translateAlternateColorCodes('&', str); }
 
-    private String genCode(UUID uuid) {
+    private String generateCode(UUID uuid) {
         String code = UUID.randomUUID().toString().substring(0, 8).toUpperCase();
         linkCodes.put(code, uuid);
         getServer().getScheduler().runTaskLater(this, () -> linkCodes.remove(code), 600L);
@@ -54,7 +54,7 @@ public final class MinecraftTelegramAuth extends JavaPlugin implements Listener 
     public void handleLink(long chatId, String code) {
         UUID uuid = linkCodes.remove(code);
         if (uuid == null) {
-            bot.send(chatId, "❌ Код недійсний або минув термін.");
+            bot.send(chatId, "❌ Код недійсний або минув термін дії.");
             return;
         }
         db.setTelegramId(uuid, chatId);
@@ -73,8 +73,8 @@ public final class MinecraftTelegramAuth extends JavaPlugin implements Listener 
         if (chatId == null) {
             db.setLoggedIn(p.getUniqueId(), true);
             p.sendMessage(color("&aВи увійшли!"));
-            String code = genCode(p.getUniqueId());
-            p.sendMessage(color("&eРекомендуємо 2FA: надішліть боту &b/link " + code));
+            String code = generateCode(p.getUniqueId());
+            p.sendMessage(color("&eРекомендуємо підключити 2FA: надішліть боту &b/link " + code));
         } else {
             db.setPending(p.getUniqueId(), true);
             bot.sendConfirm(chatId, p);
@@ -122,16 +122,19 @@ public final class MinecraftTelegramAuth extends JavaPlugin implements Listener 
         }
     }
 
-    @EventHandler void onMove(PlayerMoveEvent e) { if (!db.isLoggedIn(e.getPlayer().getUniqueId())) e.setCancelled(true); }
-    @EventHandler void onChat(AsyncPlayerChatEvent e) { if (!db.isLoggedIn(e.getPlayer().getUniqueId())) e.setCancelled(true); }
-    @EventHandler void onCommand(PlayerCommandPreprocessEvent e) {
+    @EventHandler 
+    public void onMove(PlayerMoveEvent e) { if (!db.isLoggedIn(e.getPlayer().getUniqueId())) e.setCancelled(true); }
+    @EventHandler 
+    public void onChat(AsyncPlayerChatEvent e) { if (!db.isLoggedIn(e.getPlayer().getUniqueId())) e.setCancelled(true); }
+    @EventHandler 
+    public void onCommand(PlayerCommandPreprocessEvent e) {
         String cmd = e.getMessage().toLowerCase();
         if (!cmd.startsWith("/login") && !cmd.startsWith("/register") && !db.isLoggedIn(e.getPlayer().getUniqueId()))
             e.setCancelled(true);
     }
 
     @Override
-    public boolean onCommand(org.bukkit.command.CommandSender s, org.bukkit.command.Command cmd, String l, String[] a) {
+    public boolean onCommand(org.bukkit.command.CommandSender s, org.bukkit.command.Command cmd, String l, String[] args) {
         if (!(s instanceof Player p)) return true;
         if (db.isLoggedIn(p.getUniqueId()) && !l.equals("2fa") && !l.equals("changepassword")) {
             p.sendMessage(c("&cВи вже авторизовані."));
@@ -140,7 +143,7 @@ public final class MinecraftTelegramAuth extends JavaPlugin implements Listener 
 
         switch (l.toLowerCase()) {
             case "register" -> {
-                if (a.length != 2 || !a[0].equals(a[1]) || a[0].length() < 4) {
+                if (args.length != 2 || !args[0].equals(args[1]) || args[0].length() < 4) {
                     p.sendMessage(c("&c/register <пароль> <повторити> (мін. 4 символи)"));
                     return true;
                 }
@@ -151,12 +154,12 @@ public final class MinecraftTelegramAuth extends JavaPlugin implements Listener 
                 afterPassword(p, db.register(p, a[0]));
             }
             case "login" -> {
-                if (a.length != 1) { p.sendMessage(c("&c/login <пароль>")); return true; }
+                if (args.length != 1) { p.sendMessage(c("&c/login <пароль>")); return true; }
                 afterPassword(p, db.login(p, a[0]));
             }
             case "changepassword" -> {
                 if (!db.isLoggedIn(p.getUniqueId())) { restrict(p); return true; }
-                if (a.length != 3 || !a[1].equals(a[2]) || a[1].length() < 4) {
+                if (args.length != 3 || !args[1].equals(a[2]) || args[1].length() < 4) {
                     p.sendMessage(c("&c/changepassword <старий> <новий> <повторити>"));
                     return true;
                 }
@@ -167,17 +170,17 @@ public final class MinecraftTelegramAuth extends JavaPlugin implements Listener 
                 }
             }
             case "2fa" -> {
-                if (a.length == 0) { p.sendMessage(c("&c/2fa status [гравець] | /2fa unlink")); return true; }
-                if (a[0].equalsIgnoreCase("unlink")) {
+                if (args.length == 0) { p.sendMessage(c("&c/2fa status [гравець] | /2fa unlink")); return true; }
+                if (args[0].equalsIgnoreCase("unlink")) {
                     if (!db.isLoggedIn(p.getUniqueId())) { restrict(p); return true; }
                     db.setTelegramId(p.getUniqueId(), null);
                     p.sendMessage(c("&aTelegram відв’язаний. Тепер тільки пароль."));
                     return true;
                 }
-                if (a[0].equalsIgnoreCase("status")) {
+                if (args[0].equalsIgnoreCase("status")) {
                     Player t = (a.length > 1 && p.hasPermission("telegramauth.2fa.others")) ?
                             getServer().getPlayer(a[1]) : p;
-                    if (t == null) { p.sendMessage(c("&cГравець не онлайн.")); return true; }
+                    if (t == null) { p.sendMessage(color("&cГравець не онлайн.")); return true; }
                     Long id = db.getTelegramId(t.getUniqueId());
                     p.sendMessage(c("&7=== 2FA статус: &e" + t.getName() + " &7==="));
                     p.sendMessage(id == null ? c("&c✖ Не прив’язаний") : c("&a✔ Прив’язаний (активна 2FA)"));
