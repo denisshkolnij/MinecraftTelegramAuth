@@ -1,0 +1,21 @@
+name: TelegramAuth
+version: 2.2
+main: me.sxnsh1ness.telegramauth.MinecraftTelegramAuth
+api-version: 1.21
+author: sxnsh1ness
+description: Авторизація + 2FA через Telegram
+
+commands:
+  register:
+    usage: /register <пароль> <повторити>
+  login:
+    usage: /login <пароль>
+  changepassword:
+    usage: /changepassword <старий> <новий> <повторити>
+  2fa:
+    usage: /2fa status [гравець]
+
+permissions:
+  telegramauth.2fa.others:
+    description: Перегляд статусу 2FA інших
+    default: op
